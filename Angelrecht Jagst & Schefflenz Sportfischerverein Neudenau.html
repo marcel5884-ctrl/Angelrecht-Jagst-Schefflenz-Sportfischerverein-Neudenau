@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <title>Angelrecht Jagst – Neudenau</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    html, body { height: 100%; margin: 0; }
+    #map { height: 100%; width: 100%; }
+    @media print { @page { size: landscape; } #map { height: 100vh; } }
+  </style>
+</head>
+<body>
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script>
+  const { jsPDF } = window.jspdf;
+
+  const map = L.map('map').setView([49.293, 9.276], 14);
+
+  // Basis-Layer: OpenStreetMap
+  const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap-Mitwirkende'
+  });
+
+  // Satelliten-Layer
+  let satellite;
+  const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+  if (/iPad|iPhone|iPod/.test(userAgent) && !window.MSStream) {
+    // iOS → Esri Satellite (funktioniert ohne API-Key)
+    satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      attribution: 'Tiles © Esri'
+    });
+  } else {
+    // Android / Desktop → Google Satellite
+    satellite = L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+      maxZoom: 20,
+      subdomains:['mt0','mt1','mt2','mt3'],
+      attribution: '© Google'
+    });
+  }
+
+  // Standardmäßig OSM anzeigen
+  osm.addTo(map);
+
+  // Layer-Umschaltung hinzufügen
+  const baseMaps = {
+    "Karte": osm,
+    "Satellit": satellite
+  };
+  L.control.layers(baseMaps).addTo(map);
+
+  // Punkte definieren
+  const punkte = [
+    { name: 'Obere Grenze rechtes Ufer (zu Siglingen)', coords: [49.296408007916995, 9.298364317555997], schild: true, color: 'red' },
+    { name: 'Untere Grenze rechtes Ufer (zu Herbolzheim)', coords: [49.290205926871195, 9.253404352363338], schild: true, color: 'red' },
+    { name: 'Untere Grenze linkes Ufer (zu Herbolzheim)', coords: [49.28859876007178, 9.262380702014418], schild: false, color: 'red' },
+    { name: 'Obere Grenze linkes Ufer (zu Siglingen)', coords: [49.28614767173704, 9.297134480518787], schild: false, color: 'red' },
+    { name: 'Obere Grenze Schefflenz (zu Allfeld)', coords: [49.29979527411752, 9.2521627850094], schild: true, color: 'green' },
+    { name: 'Untere Grenze (zu Höchstberg)', coords: [49.28536741033837, 9.238152970288503], schild: true, color: 'green' }
+  ];
+
+  const markerGruppe = L.featureGroup();
+
+  punkte.forEach(punkt => {
+    const marker = L.circleMarker(punkt.coords, { radius: 7, color: punkt.color, fillColor: punkt.color, fillOpacity: 1 }).addTo(map);
+
+    const lat = punkt.coords[0];
+    const lng = punkt.coords[1];
+    const gmaps = `https://www.google.com/maps?q=${lat},${lng}`;
+    const popupText = `<strong>${punkt.name}</strong><br>Koordinate:<br>${lat.toFixed(6)}, ${lng.toFixed(6)}<br><br><a href='${gmaps}' target='_blank'>In Google Maps öffnen</a>`;
+    marker.bindPopup(popupText);
+
+    if (punkt.schild) {
+      L.marker(punkt.coords, { icon: L.divIcon({ className: 'label', html: '<span style="color:black; font-weight:bold;">Grenzschild vorhanden</span>', iconSize: [140, 20], iconAnchor: [-10, -10] }) }).addTo(map);
+    }
+
+    markerGruppe.addLayer(marker);
+  });
+
+  map.fitBounds(markerGruppe.getBounds());
+
+  // GPS Button
+  const locateControl = L.control({ position: 'topleft' });
+  locateControl.onAdd = function () {
+    const div = L.DomUtil.create('div', 'leaflet-bar leaflet-control');
+    div.innerHTML = '<a href="#" title="Mein Standort">📍</a>';
+    div.style.backgroundColor = 'white'; div.style.width = '30px'; div.style.height = '30px'; div.style.lineHeight = '30px'; div.style.textAlign = 'center'; div.style.cursor = 'pointer';
+    div.onclick = function (e) { e.preventDefault(); map.locate({ setView: true, maxZoom: 16 }); };
+    return div;
+  };
+  locateControl.addTo(map);
+  map.on('locationfound', e => { L.circleMarker(e.latlng, { radius: 8, color: 'green', fillColor: 'green', fillOpacity: 0.8 }).addTo(map).bindPopup('Dein Standort').openPopup(); });
+  map.on('locationerror', () => { alert('Standort konnte nicht ermittelt werden'); });
+
+  // Druck-Button PDF
+  const printControl = L.control({ position: 'topleft' });
+  printControl.onAdd = function () {
+    const div = L.DomUtil.create('div', 'leaflet-bar leaflet-control');
+    div.innerHTML = '<a href="#" title="Karte drucken">🖨️</a>'; div.style.backgroundColor = 'white'; div.style.width = '30px'; div.style.height = '30px'; div.style.lineHeight = '30px'; div.style.textAlign = 'center'; div.style.cursor = 'pointer';
+    div.onclick = async e => {
+      e.preventDefault();
+      const canvas = await html2canvas(document.getElementById('map'));
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF({ orientation: 'landscape' });
+      const imgProps = pdf.getImageProperties(imgData);
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      pdf.save('Angelrechtskarte_Jagst.pdf');
+    };
+    return div;
+  };
+  printControl.addTo(map);
+</script>
+</body>
+</html>
